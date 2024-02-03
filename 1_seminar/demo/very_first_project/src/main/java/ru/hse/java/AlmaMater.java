@@ -4,9 +4,8 @@ import java.time.ZonedDateTime;
 
 /**
  * Реализовать методы
- * */
+ */
 public interface AlmaMater {
-
-    ZonedDateTime getDateOfGraduation();
+    public ZonedDateTime getDateOfGraduation();
 
 }
