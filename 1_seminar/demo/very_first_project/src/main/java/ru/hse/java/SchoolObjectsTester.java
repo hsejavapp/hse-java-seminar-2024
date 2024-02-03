@@ -1,4 +1,4 @@
-package main;
+package ru.hse.java;
 
 import java.util.*;
 
