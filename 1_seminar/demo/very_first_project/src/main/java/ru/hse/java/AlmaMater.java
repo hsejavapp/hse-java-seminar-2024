@@ -7,6 +7,6 @@ import java.time.ZonedDateTime;
  * */
 public interface AlmaMater {
 
-    ZonedDateTime getDateOfGraduation();
+    ZonedDateTime getDateOfGraduation(Student student);
 
 }
