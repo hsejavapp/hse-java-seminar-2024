@@ -1,7 +1,10 @@
 package ru.hse.java;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 public class School {
@@ -25,6 +28,18 @@ public class School {
         }
         this.name = name;
         this.students = students;
+
+
+        Predicate<String> added = students::add;
+        if (added.test("1")) {
+            System.out.println("added");
+        }
+        Consumer<String> actionAdd = students::add;
+        actionAdd.accept("2");
+        students.sort((s1, s2) -> (s1.length() - s2.length()));
+        students.sort(Comparator.comparingInt(String::length));
+        students.sort(String::compareToIgnoreCase);
+        students.sort(Comparator.naturalOrder());
     }
 
     public String getName() {
