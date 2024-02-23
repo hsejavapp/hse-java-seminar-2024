@@ -8,38 +8,34 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 public class School {
-    private static final Pattern NAME_MASK = Pattern.compile("[А-Яа-я ]+");
+    private static final Pattern NAME_MASK = Pattern.compile("[А-Яа-яA-Za-z ]+");
+
     static boolean nameIsValid(String name) {
         return NAME_MASK.matcher(name).matches();
     }
+
     // fie
     private String name;
-    private List<String> students;
+    private List<Student> students;
 
     public School(String name) {
         this(name, List.of());
     }
 
-    public School(String name, List<String> students) {
+    public School(String name, List<Student> students) {
         Objects.requireNonNull(name);
         Objects.requireNonNull(students);
-        if (students.stream().anyMatch(a -> !School.nameIsValid(a))) {
-            throw new IllegalArgumentException(students + " has not valid by " + NAME_MASK + " pattern.");
+
+        if (!School.nameIsValid(name)) {
+            throw new IllegalArgumentException(name + " not valid by " + NAME_MASK + " pattern.");
         }
+
+        if (students.stream().anyMatch(a -> !a.isValid())) {
+            throw new IllegalArgumentException(students + " has not valid item by class Student pattern.");
+        }
+
         this.name = name;
         this.students = students;
-
-
-        Predicate<String> added = students::add;
-        if (added.test("1")) {
-            System.out.println("added");
-        }
-        Consumer<String> actionAdd = students::add;
-        actionAdd.accept("2");
-        students.sort((s1, s2) -> (s1.length() - s2.length()));
-        students.sort(Comparator.comparingInt(String::length));
-        students.sort(String::compareToIgnoreCase);
-        students.sort(Comparator.naturalOrder());
     }
 
     public String getName() {
@@ -51,11 +47,11 @@ public class School {
         this.name = name;
     }
 
-    public List<String> getStudents() {
+    public List<Student> getStudents() {
         return students;
     }
 
-    public void setStudents(List<String> students) {
+    public void setStudents(List<Student> students) {
         this.students = students;
     }
 
