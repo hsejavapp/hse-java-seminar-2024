@@ -1,5 +1,6 @@
 package ru.hse.java;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -21,6 +22,7 @@ public class School {
     }
 
     public School(String name, List<String> students) {
+
         Objects.requireNonNull(name);
         Objects.requireNonNull(students);
         if (students.stream().anyMatch(a -> !School.nameIsValid(a))) {
