@@ -1,14 +1,14 @@
 package ru.hse.java;
 
 import com.google.common.base.Stopwatch;
-import com.google.common.reflect.Reflection;
 import com.google.common.util.concurrent.Striped;
+import com.lmax.disruptor.EventTranslatorThreeArg;
+import com.lmax.disruptor.dsl.Disruptor;
+import com.lmax.disruptor.util.DaemonThreadFactory;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
-import org.eclipse.collections.impl.utility.internal.ReflectionHelper;
 import org.jctools.maps.NonBlockingHashMapLong;
 
-import java.lang.reflect.Constructor;
+import javax.annotation.concurrent.NotThreadSafe;
 import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.*;
@@ -88,6 +88,38 @@ public class ConcurrencyPatternsExample {
         @Override
         public CompletableFuture<Boolean> insert(long id, Entity entity) {
             data.put(id, entity);
+            return CompletableFuture.completedFuture(Boolean.TRUE);
+        }
+    }
+
+    /**
+     * */
+    @NotThreadSafe
+    public static class DbWithThreadLocalWrites implements Db {
+        final Map<Thread, Long2ObjectOpenHashMap<Entity>> threads = new ConcurrentHashMap<>();
+        final InheritableThreadLocal<Long2ObjectOpenHashMap<Entity>> locals = new InheritableThreadLocal<>() {
+            @Override
+            protected Long2ObjectOpenHashMap<Entity> initialValue() {
+                var val = new Long2ObjectOpenHashMap<Entity>();
+                var old = threads.putIfAbsent(Thread.currentThread(), val);
+                return old == null ? val : old;
+            }
+        };
+
+        @Override
+        public CompletableFuture<Entity> getEntity(long id) {
+            for (var map : threads.values()) {
+                var entity = map.get(id);
+                if (entity != null) {
+                    return CompletableFuture.completedFuture(entity);
+                }
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Boolean> insert(long id, Entity entity) {
+            locals.get().put(id, entity);
             return CompletableFuture.completedFuture(Boolean.TRUE);
         }
     }
@@ -220,6 +252,75 @@ public class ConcurrencyPatternsExample {
         }
     }
 
+    public static class DbWithDisruptor implements Db {
+        static final class BufferEvent {
+            long key;
+            Entity entity;
+            CompletableFuture<?> promise;
+
+            boolean isRead() {
+                return entity == null;
+            }
+
+            void writeAndClear(Entity entity) {
+                ((CompletableFuture<Entity>) promise).complete(entity);
+                key = 0;
+                promise = null;
+            }
+
+            void completeAndClear() {
+                ((CompletableFuture<Boolean>) promise).complete(Boolean.TRUE);
+                key = 0;
+                entity = null;
+                promise = null;
+            }
+        }
+        static final EventTranslatorThreeArg<BufferEvent, Long, Entity, CompletableFuture<?>>
+                TRANSLATOR = (bufferEvent, l, aLong, entity, future) -> {
+            bufferEvent.key = aLong;
+            bufferEvent.entity = entity;
+            bufferEvent.promise = future;
+        };
+        final Disruptor<BufferEvent> disruptor;
+        /**
+         * Read/Writes always from single thread inside disruptor.
+         * */
+        final Map<Long, Entity> data = new Long2ObjectOpenHashMap<>();
+
+        {
+            int bufferSize = 1024;
+            disruptor = new Disruptor<>(
+                    BufferEvent::new,
+                    bufferSize,
+                    DaemonThreadFactory.INSTANCE);
+
+            disruptor.handleEventsWith((event, sequence, endOfBatch) -> {
+                if (event.isRead()) {
+                    event.writeAndClear(data.get(event.key));
+                } else {
+                    data.put(event.key, event.entity);
+                    event.completeAndClear();
+                }
+            });
+            disruptor.start();
+
+        }
+
+        @Override
+        public CompletableFuture<Entity> getEntity(long id) {
+            CompletableFuture<Entity> future;
+            disruptor.publishEvent(TRANSLATOR, id, null, future = new CompletableFuture<>());
+            return future;
+        }
+
+        @Override
+        public CompletableFuture<Boolean> insert(long id, Entity entity) {
+            CompletableFuture<Boolean> future;
+            disruptor.publishEvent(TRANSLATOR, id, entity, future = new CompletableFuture<>());
+            return future;
+        }
+    }
+
 
     private boolean expiredResult(Integer result) {
         return ((Integer) result) == 0;
@@ -282,7 +383,9 @@ public class ConcurrencyPatternsExample {
                 DbWithStampedLock.class,
                 DbWithConcurrentMap.class,
                 DbWithStripedLock.class,
-                DbWithNonBlockingMap.class);
+                DbWithNonBlockingMap.class,
+//                DbWithThreadLocalWrites.class,
+                DbWithDisruptor.class);
 
         for (int c = 0; c < candidates.size(); c++) {
 
