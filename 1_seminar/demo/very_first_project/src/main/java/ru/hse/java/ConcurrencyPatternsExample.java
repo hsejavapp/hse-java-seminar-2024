@@ -321,6 +321,62 @@ public class ConcurrencyPatternsExample {
         }
     }
 
+    public static class DbWithActor implements Db {
+        final Executor executor = Executors.newWorkStealingPool(2);
+        final BaseActor<CompletableFuture<?>> dbActor = new BaseActor<>(executor);
+
+        static final class ReadOp extends CompletableFuture<Entity> {
+            private final long id;
+
+            public ReadOp(long id) {
+                this.id = id;
+            }
+        }
+
+        static final class WriteOp extends CompletableFuture<Boolean> {
+            private final long id;
+            private final Entity entity;
+
+            public WriteOp(long id, Entity entity) {
+                this.id = id;
+                this.entity = entity;
+            }
+        }
+        /**
+         * Read/Writes always from single thread inside disruptor.
+         * */
+        final Map<Long, Entity> data = new Long2ObjectOpenHashMap<>();
+
+        {
+            dbActor.setAction(future -> {
+                switch (future) {
+                    case ReadOp readOp -> {
+                        var entity = data.get(readOp.id);
+                        readOp.complete(entity);
+                    }
+                    case WriteOp writeOp -> {
+                        data.put(writeOp.id, writeOp.entity);
+                        writeOp.complete(Boolean.TRUE);
+                    }
+                    default -> future.completeExceptionally(new IllegalArgumentException("Unknown type of " + future));
+                }
+            });
+        }
+
+        @Override
+        public CompletableFuture<Entity> getEntity(long id) {
+            CompletableFuture<Entity> future = new ReadOp(id);
+            dbActor.enqueue(future);
+            return future;
+        }
+
+        @Override
+        public CompletableFuture<Boolean> insert(long id, Entity entity) {
+            CompletableFuture<Boolean> future = new WriteOp(id, entity);
+            dbActor.enqueue(future);
+            return future;
+        }
+    }
 
     private boolean expiredResult(Integer result) {
         return ((Integer) result) == 0;
@@ -376,6 +432,16 @@ public class ConcurrencyPatternsExample {
 
     public static void main(String[] args) throws Exception {
 
+//        SyncDb, 225.5 ms, 75
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithReentrantLock@728938a9, 135.2 ms, 45
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithReentrantRWLock@3d646c37, 134.3 ms, 44
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithStampedLock@5a10411, 93.46 ms, 31
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithConcurrentMap@306a30c7, 90.48 ms, 30
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithStripedLock@2cdf8d8a, 129.0 ms, 42
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithNonBlockingMap@23ab930d, 69.49 ms, 23
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithDisruptor@1e81f4dc, 118.7 ms, 39
+//        ru.hse.java.ConcurrencyPatternsExample$DbWithActor@5577140b, 83.24 ms, 27
+
         var candidates = List.of(
                 SyncDb.class,
                 DbWithReentrantLock.class,
@@ -385,7 +451,8 @@ public class ConcurrencyPatternsExample {
                 DbWithStripedLock.class,
                 DbWithNonBlockingMap.class,
 //                DbWithThreadLocalWrites.class,
-                DbWithDisruptor.class);
+                DbWithDisruptor.class,
+                DbWithActor.class);
 
         for (int c = 0; c < candidates.size(); c++) {
 
